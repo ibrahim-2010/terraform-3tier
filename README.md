@@ -720,6 +720,21 @@ You should see 0/100 points. As you complete each step, your score will increase
 
 ## EC2 Path: Traditional 3-Tier
 
+> **🖥️ ENVIRONMENT: LocalStack (Local Testing)**
+>
+> All steps below (Steps 3–8) run against **LocalStack on your machine** — not real AWS.
+> Nothing costs money. Nothing leaves your laptop. If you completed Step 2, your `provider_override.tf` is redirecting all Terraform commands to `http://localhost:4566`.
+>
+> **How to verify you're using LocalStack (run this anytime):**
+> ```bash
+> # If this file exists, you're using LocalStack. If not, you're pointing at real AWS.
+> ls provider_override.tf
+> ```
+>
+> You will NOT touch real AWS until the optional ["Deploying to Real AWS"](#deploying-to-real-aws) section at the very end.
+
+---
+
 ### Step 3: Create the VPC and Networking
 
 Complete `vpc.tf`:
@@ -935,12 +950,15 @@ resource "aws_route_table_association" "private_db" {
 - [ ] **Q2:** Why do we place the NAT Gateway in a public subnet?
 - [ ] **Q3:** What does `depends_on = [aws_internet_gateway.main]` do? What would happen without it?
 
-### Check Your Progress
+### Check Your Progress (LocalStack)
 
 ```bash
 terraform validate          # Check syntax
+terraform apply             # Apply to LocalStack (free, local only)
 python run.py               # Should show ~25/100 (provider + VPC)
 ```
+
+> Remember: `terraform apply` here hits LocalStack, not real AWS. You can run it as many times as you want with zero cost.
 
 ---
 
@@ -1157,9 +1175,10 @@ resource "aws_security_group" "db" {
 - [ ] **Q2:** What does `protocol = "-1"` mean in the egress rules?
 - [ ] **Q3:** If an attacker compromises a web server, can they directly access the database? Why or why not?
 
-### Check Your Progress
+### Check Your Progress (LocalStack)
 
 ```bash
+terraform apply             # Apply to LocalStack (free, local only)
 python run.py               # Should show ~35/100 (provider + VPC + security)
 ```
 
@@ -1283,9 +1302,10 @@ resource "aws_lb_target_group_attachment" "web" {
 - [ ] **Q2:** Why is the ALB in public subnets but the web servers are in private subnets?
 - [ ] **Q3:** What does `matcher = "200"` mean in the health check? What if your app returns a 302 redirect on `/`?
 
-### Check Your Progress
+### Check Your Progress (LocalStack)
 
 ```bash
+terraform apply             # Apply to LocalStack (free, local only)
 python run.py               # Should show ~55/100 (provider + VPC + security + ALB)
 ```
 
@@ -1446,9 +1466,10 @@ resource "aws_instance" "app" {
 - [ ] **Q2:** What does `user_data` do? When does it run? What happens if it fails?
 - [ ] **Q3:** What does `count.index % 2` achieve? Why not just `count.index`?
 
-### Check Your Progress
+### Check Your Progress (LocalStack)
 
 ```bash
+terraform apply             # Apply to LocalStack (free, local only)
 python run.py               # Should show ~80/100 (provider + VPC + security + ALB + EC2)
 ```
 
@@ -1562,9 +1583,10 @@ resource "aws_db_instance" "main" {
 - [ ] **Q3:** Why is `publicly_accessible = false` important for a database?
 - [ ] **Q4:** The password is set with `default = "changeme123!"` in variables.tf. Why is this bad for production? How would you fix it?
 
-### Check Your Progress
+### Check Your Progress (LocalStack)
 
 ```bash
+terraform apply             # Apply to LocalStack (free, local only)
 python run.py               # Should show ~95-100/100
 ```
 
@@ -1705,6 +1727,10 @@ output "db_name" {
 ---
 
 ## ECS Path: Containerized 3-Tier
+
+> **🖥️ ENVIRONMENT: LocalStack (Local Testing)**
+>
+> Like the EC2 path, all ECS steps run against **LocalStack on your machine**. Nothing costs money.
 
 > **Note:** Complete the VPC (Step 3) and Security Groups (Step 4) from the EC2 path first! The ECS path reuses those resources.
 
@@ -1989,22 +2015,26 @@ resource "aws_lb_target_group" "web_ecs" {
 
 ## Testing Locally with LocalStack
 
-### Run Terraform
+> **🖥️ ENVIRONMENT: LocalStack (Local Testing)** — This entire section runs on your machine. No AWS costs.
+
+If you've been running `terraform apply` after each step (recommended), your resources are already created. This section is a summary of how to do a full deploy from scratch, or a reset if you want to start over.
+
+### Run Terraform (Full LocalStack Deploy)
 
 ```bash
-# 1. Start LocalStack
+# 1. Start LocalStack (skip if already running)
 docker-compose up -d
 
-# 2. Copy LocalStack provider override
+# 2. Copy LocalStack provider override (skip if already done)
 cp provider_override.tf.example provider_override.tf
 
-# 3. Initialize Terraform
+# 3. Initialize Terraform (skip if already done)
 terraform init
 
 # 4. Preview resources
 terraform plan
 
-# 5. Create resources
+# 5. Create resources (hits LocalStack, not real AWS)
 terraform apply
 # Type "yes" to confirm
 ```
@@ -2022,7 +2052,9 @@ vpc_id = "vpc-abc123"
 web_instance_ids = ["i-web1", "i-web2"]
 ```
 
-### Verify with CLI
+### Verify with CLI (LocalStack)
+
+Notice how every command below uses `--endpoint-url=http://localhost:4566` — this targets LocalStack, not real AWS.
 
 ```bash
 # List all VPCs
@@ -2066,7 +2098,39 @@ Opens a web page at http://localhost:8080 showing:
 
 ---
 
-## Deploying to Real AWS
+## Challenge Complete — What's Next?
+
+If you've reached **100/100 on `python run.py`**, congratulations — **the challenge is done!** Everything above ran against LocalStack on your machine. No AWS account was needed, and nothing cost money.
+
+**You can stop here.** The section below is entirely optional.
+
+---
+
+## (Optional) Deploying to Real AWS
+
+> **⚠️ ENVIRONMENT CHANGE: Real AWS (costs real money)**
+>
+> Everything below this line creates **real infrastructure in your AWS account** that **costs money** (~$95/month after free tier).
+> Do NOT proceed unless you:
+> 1. Have an AWS account with billing enabled
+> 2. Understand you will be charged for running resources
+> 3. Will run `terraform destroy` immediately when done testing
+>
+> **How to switch from LocalStack to real AWS:**
+> ```bash
+> # Delete the LocalStack override — this is what tells Terraform to use real AWS
+> rm provider_override.tf
+>
+> # Reinitialize Terraform (it will now download the real AWS provider config)
+> terraform init
+> ```
+>
+> **How to verify which environment you're targeting:**
+> ```bash
+> # If this file EXISTS → you're using LocalStack (safe, free)
+> # If this file is GONE → you're pointing at real AWS ($$$)
+> ls provider_override.tf
+> ```
 
 ### Prerequisites
 
@@ -2088,21 +2152,22 @@ Opens a web page at http://localhost:8080 showing:
 
 ### Deploy
 
+If you haven't already, switch to real AWS (see the environment change box above):
+
 ```bash
-# 1. Remove LocalStack override
-rm provider_override.tf
+# Verify LocalStack override is removed
+ls provider_override.tf  # Should say "No such file"
 
-# 2. Reinitialize
-terraform init
-
-# 3. Update variables for production
+# Update variables for production
 # Edit terraform.tfvars or use -var flags
+# IMPORTANT: Change the default database password from "changeme123!"
 
-# 4. Plan and Apply
+# Plan first — review what will be created
 terraform plan
-terraform apply
 
-# WARNING: This creates REAL resources that cost money!
+# Apply — THIS CREATES REAL RESOURCES THAT COST MONEY
+terraform apply
+# Type "yes" only if you've reviewed the plan above
 ```
 
 ### Verify in AWS Console
@@ -2151,6 +2216,8 @@ aws ec2 describe-vpcs --filters "Name=tag:Project,Values=terraform-3tier"
 ---
 
 ## Run the Progress Checker
+
+> `python run.py` checks your `.tf` files for correct structure. It works the same whether you're using LocalStack or real AWS — it reads your code, not your running infrastructure.
 
 ```bash
 python run.py
