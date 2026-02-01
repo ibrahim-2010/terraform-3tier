@@ -4,6 +4,20 @@
 
 ---
 
+## Learning Objectives
+
+By the end of this challenge, you will be able to:
+
+1. **Explain** what a 3-tier architecture is, why companies use it, and how it maps to AWS services
+2. **Design** a VPC with public, private, and isolated subnets using proper CIDR allocation
+3. **Implement** security group chaining where each tier only accepts traffic from the tier above it
+4. **Configure** an Application Load Balancer with target groups and health checks
+5. **Deploy** EC2 instances (or ECS Fargate containers) across multiple availability zones
+6. **Set up** an RDS database in an isolated subnet with encryption and Multi-AZ failover
+7. **Test** infrastructure locally using LocalStack before deploying to real AWS
+
+---
+
 ## Quick Start
 
 ```bash
@@ -164,6 +178,17 @@ SECURITY GROUPS FLOW:
 ━━━━━━━━━━━━━━━━━━━━━
 Internet ──► ALB-SG (80, 443) ──► Web-SG (80 from ALB) ──► App-SG (8080 from Web) ──► DB-SG (3306 from App)
 ```
+
+### Visual Architecture References
+
+The ASCII diagrams above show the logical structure. For polished visual diagrams of 3-tier architecture on AWS, see these resources:
+
+- [AWS Well-Architected Labs - Multi-Tier Architecture](https://wellarchitectedlabs.com) — Official AWS reference architectures with detailed diagrams
+- [AWS Architecture Blog - Three-Tier Web Architecture](https://aws.amazon.com/architecture/) — Search "three tier" for reference architecture diagrams with icons
+- [AWS Icons & Diagram Kit](https://aws.amazon.com/architecture/icons/) — Download official AWS architecture icons to create your own diagrams
+- [Draw.io AWS Architecture Templates](https://app.diagrams.net) — Free diagramming tool with AWS shape libraries (search "AWS 3-tier" in templates)
+
+These visual references show the same architecture you're building, rendered with official AWS service icons instead of ASCII art. They're useful for presentations, documentation, and understanding how the pieces connect visually.
 
 ---
 
@@ -339,14 +364,14 @@ Let's trace a real request step by step:
 ## Do I Need Prior Knowledge?
 
 **You need:**
-- ✅ Completed the Terraform Basics challenge (or equivalent)
-- ✅ Understanding of VPCs, subnets, security groups
-- ✅ Basic networking concepts (public vs private)
+- Completed the Terraform Basics challenge (or equivalent)
+- Understanding of VPCs, subnets, security groups
+- Basic networking concepts (public vs private)
 
 **You don't need:**
-- ❌ AWS account (we'll use LocalStack)
-- ❌ Prior load balancer or RDS experience
-- ❌ Container experience (for EC2 path)
+- AWS account (we'll use LocalStack)
+- Prior load balancer or RDS experience
+- Container experience (for EC2 path)
 
 **You'll learn:**
 - Multi-tier architecture design
@@ -399,10 +424,37 @@ Let's trace a real request step by step:
 
 ## Step 0: Prerequisites
 
+### How Terraform Works
+
+Before diving in, understand what Terraform actually does. You write `.tf` files that describe the infrastructure you want, and Terraform talks to the AWS API to create it:
+
+```
+You write code             Terraform does the work              AWS creates resources
+┌──────────────┐          ┌──────────────────────┐             ┌──────────────────┐
+│  vpc.tf      │          │                      │             │  VPC             │
+│  security.tf │  ─────►  │  terraform plan      │  ─────►    │  Subnets         │
+│  alb.tf      │  "Here's │  (preview changes)   │  AWS API   │  Security Groups │
+│  ec2.tf      │  what I  │                      │  calls     │  Load Balancer   │
+│  rds.tf      │  want"   │  terraform apply     │             │  EC2 Instances   │
+│              │          │  (create resources)  │             │  RDS Database    │
+└──────────────┘          └──────────────────────┘             └──────────────────┘
+                                     │
+                          ┌──────────▼──────────┐
+                          │  terraform.tfstate   │
+                          │  (tracks what exists)│
+                          └─────────────────────┘
+```
+
+**Key workflow:**
+1. `terraform init` — Download providers (AWS plugin)
+2. `terraform plan` — Preview what will be created/changed (safe, read-only)
+3. `terraform apply` — Actually create the resources
+4. `terraform destroy` — Tear everything down
+
 ### Install Required Tools
 
 <details>
-<summary>🪟 Windows</summary>
+<summary>Windows</summary>
 
 ```powershell
 # Terraform
@@ -423,7 +475,7 @@ aws --version
 </details>
 
 <details>
-<summary>🍎 Mac</summary>
+<summary>Mac</summary>
 
 ```bash
 # Terraform
@@ -444,7 +496,7 @@ aws --version
 </details>
 
 <details>
-<summary>🐧 Linux</summary>
+<summary>Linux</summary>
 
 ```bash
 # Terraform
@@ -482,8 +534,6 @@ aws configure
 
 ## Step 1: Understanding the Architecture
 
-> ⏱️ **Time:** 15-20 minutes (reading)
-
 ### Network Design
 
 ```
@@ -502,6 +552,53 @@ VPC: 10.0.0.0/16
     └── 10.0.21.0/24 (AZ-b) ─── RDS Standby
 ```
 
+### Understanding CIDR Notation
+
+The network design above uses CIDR notation (e.g., `10.0.0.0/16`). If this is new to you, here's what it means:
+
+**The `/number` tells you how many IP addresses are available:**
+
+```
+CIDR             What it means                    IP addresses
+──────────────   ──────────────────────────────   ────────────
+10.0.0.0/16      10.0.0.0 → 10.0.255.255         65,536 IPs (the whole VPC)
+10.0.1.0/24      10.0.1.0 → 10.0.1.255           256 IPs (one subnet)
+10.0.10.0/24     10.0.10.0 → 10.0.10.255         256 IPs (one subnet)
+10.0.20.0/24     10.0.20.0 → 10.0.20.255         256 IPs (one subnet)
+```
+
+**Think of it like a building with floors and rooms:**
+
+```
+VPC 10.0.0.0/16 = The entire building (65,536 rooms)
+│
+├── /24 subnets = individual floors (256 rooms each)
+│   ├── Floor 1  (10.0.1.0/24)  = Public subnet AZ-a
+│   ├── Floor 2  (10.0.2.0/24)  = Public subnet AZ-b
+│   ├── Floor 10 (10.0.10.0/24) = App subnet AZ-a
+│   ├── Floor 11 (10.0.11.0/24) = App subnet AZ-b
+│   ├── Floor 20 (10.0.20.0/24) = DB subnet AZ-a
+│   └── Floor 21 (10.0.21.0/24) = DB subnet AZ-b
+```
+
+**The `cidrsubnet()` function in Terraform:**
+
+In the hints and solutions, you'll see `cidrsubnet(var.vpc_cidr, 8, count.index + 1)`. Here's what the 3 arguments mean:
+
+```
+cidrsubnet("10.0.0.0/16",  8,  1)
+             │               │   │
+             │               │   └─ Which subnet number? (1 = 10.0.1.0/24)
+             │               └─── Add 8 bits to the prefix (16+8=24, so /24 subnets)
+             └─────────────────── The VPC CIDR to subdivide
+
+Examples:
+  cidrsubnet("10.0.0.0/16", 8, 1)  → "10.0.1.0/24"
+  cidrsubnet("10.0.0.0/16", 8, 2)  → "10.0.2.0/24"
+  cidrsubnet("10.0.0.0/16", 8, 10) → "10.0.10.0/24"
+  cidrsubnet("10.0.0.0/16", 8, 20) → "10.0.20.0/24"
+```
+
 ### Security Group Rules
 
 ```
@@ -517,13 +614,39 @@ Internet ──► ALB (port 80/443)
           RDS SG ◄── Only App Tier can access (port 3306/5432)
 ```
 
+### Checkpoint: Self-Reflection
+
+- [ ] **Q1:** Why are there 3 types of subnets (public, private-app, private-db) instead of just public and private?
+- [ ] **Q2:** What would happen if the database was in a public subnet?
+- [ ] **Q3:** Why do we need a NAT Gateway? What can private subnets NOT do without one?
+- [ ] **Q4:** Why deploy across 2 Availability Zones instead of 1?
+
 ---
 
 ## Step 2: Set Up LocalStack
 
-> ⏱️ **Time:** 10 minutes
+### What is LocalStack?
 
-Start LocalStack to simulate AWS locally:
+**LocalStack is a fake AWS that runs on your laptop.** It simulates AWS services (VPC, EC2, RDS, etc.) locally so you can test your Terraform code without:
+- Needing an AWS account
+- Paying for any resources
+- Waiting for real infrastructure to provision
+- Accidentally leaving resources running and getting charged
+
+It works by running a Docker container that exposes the same API endpoints as AWS, but everything stays on your machine.
+
+### How the Provider Override Works
+
+When you use Terraform with real AWS, it sends API calls to `https://ec2.us-east-1.amazonaws.com`. With LocalStack, we redirect those calls to `http://localhost:4566` instead.
+
+The file `provider_override.tf.example` contains this redirect configuration. You'll copy it to `provider_override.tf` to activate it:
+
+```
+Real AWS:        .tf files → Terraform → https://aws.amazon.com → Real resources ($$$)
+LocalStack:      .tf files → Terraform → http://localhost:4566  → Simulated resources (free)
+```
+
+### Start LocalStack
 
 ```bash
 # Start LocalStack
@@ -542,13 +665,62 @@ curl http://localhost:4566/_localstack/health
 {"services": {"ec2": "running", "elbv2": "running", "rds": "running", ...}}
 ```
 
+### Activate the Provider Override
+
+```bash
+# Copy the override file to redirect Terraform to LocalStack
+cp provider_override.tf.example provider_override.tf
+
+# Initialize Terraform (downloads the AWS provider)
+terraform init
+```
+
+---
+
+## How the Starter Files Work
+
+Before you start coding, understand what's in the repo. Each `.tf` file contains **commented-out starter code** with TODO markers. Your job is to **uncomment the code and fill in any missing parts**.
+
+Here's an example from `main.tf`:
+
+```hcl
+# What you'll see (starter):
+# TODO: Uncomment and configure the AWS provider
+# aws = {
+#   source  = "hashicorp/aws"
+#   version = "~> 5.0"
+# }
+
+# What you need to change it to (uncommented + completed):
+aws = {
+  source  = "hashicorp/aws"
+  version = "~> 5.0"
+}
+```
+
+**The workflow for each step:**
+1. Open the `.tf` file mentioned in the step
+2. Read the TODO comments to understand what's needed
+3. Use the README hints if you get stuck
+4. Uncomment and complete the code
+5. Run `terraform validate` to check syntax
+6. Run `python run.py` to check your score
+
+### Check Your Starting Score
+
+Run the progress checker now to see your baseline:
+
+```bash
+python run.py
+```
+
+You should see 0/100 points. As you complete each step, your score will increase.
+
 ---
 
 ## EC2 Path: Traditional 3-Tier
 
 ### Step 3: Create the VPC and Networking
-
-> ⏱️ **Time:** 30-40 minutes
 
 Complete `vpc.tf`:
 
@@ -562,7 +734,7 @@ Complete `vpc.tf`:
 - [ ] Route tables for each subnet type
 
 <details>
-<summary>💡 Hint 1: VPC and Subnets</summary>
+<summary>Hint 1: VPC and Subnets</summary>
 
 ```hcl
 resource "aws_vpc" "main" {
@@ -592,7 +764,7 @@ resource "aws_subnet" "public" {
 </details>
 
 <details>
-<summary>💡 Hint 2: NAT Gateway</summary>
+<summary>Hint 2: NAT Gateway</summary>
 
 ```hcl
 resource "aws_eip" "nat" {
@@ -618,7 +790,7 @@ resource "aws_nat_gateway" "main" {
 </details>
 
 <details>
-<summary>🎯 Full VPC Solution</summary>
+<summary>Full VPC Solution</summary>
 
 ```hcl
 # Data source for AZs
@@ -757,11 +929,22 @@ resource "aws_route_table_association" "private_db" {
 
 </details>
 
+### Checkpoint: Self-Reflection
+
+- [ ] **Q1:** What does the NAT Gateway enable private subnets to do? Why not just attach an Internet Gateway to private subnets?
+- [ ] **Q2:** Why do we place the NAT Gateway in a public subnet?
+- [ ] **Q3:** What does `depends_on = [aws_internet_gateway.main]` do? What would happen without it?
+
+### Check Your Progress
+
+```bash
+terraform validate          # Check syntax
+python run.py               # Should show ~25/100 (provider + VPC)
+```
+
 ---
 
 ### Step 4: Create Security Groups
-
-> ⏱️ **Time:** 20-25 minutes
 
 Complete `security.tf`:
 
@@ -772,7 +955,7 @@ Complete `security.tf`:
 - [ ] Database security group (allow from app tier only)
 
 <details>
-<summary>💡 Hint: Security Group Chain</summary>
+<summary>Hint: Security Group Chain</summary>
 
 ```hcl
 # ALB Security Group
@@ -830,7 +1013,7 @@ resource "aws_security_group" "web" {
 </details>
 
 <details>
-<summary>🎯 Full Security Groups Solution</summary>
+<summary>Full Security Groups Solution</summary>
 
 ```hcl
 # ALB Security Group
@@ -968,11 +1151,21 @@ resource "aws_security_group" "db" {
 
 </details>
 
+### Checkpoint: Self-Reflection
+
+- [ ] **Q1:** Why do we reference `security_groups = [aws_security_group.alb.id]` instead of using a CIDR block like `cidr_blocks = ["10.0.1.0/24"]`? What's the advantage?
+- [ ] **Q2:** What does `protocol = "-1"` mean in the egress rules?
+- [ ] **Q3:** If an attacker compromises a web server, can they directly access the database? Why or why not?
+
+### Check Your Progress
+
+```bash
+python run.py               # Should show ~35/100 (provider + VPC + security)
+```
+
 ---
 
 ### Step 5: Create the Application Load Balancer
-
-> ⏱️ **Time:** 25-30 minutes
 
 Complete `alb.tf`:
 
@@ -983,7 +1176,7 @@ Complete `alb.tf`:
 - [ ] Health check configuration
 
 <details>
-<summary>💡 Hint: ALB Components</summary>
+<summary>Hint: ALB Components</summary>
 
 ```hcl
 resource "aws_lb" "main" {
@@ -1018,7 +1211,7 @@ resource "aws_lb_target_group" "web" {
 </details>
 
 <details>
-<summary>🎯 Full ALB Solution</summary>
+<summary>Full ALB Solution</summary>
 
 ```hcl
 # Application Load Balancer
@@ -1084,11 +1277,21 @@ resource "aws_lb_target_group_attachment" "web" {
 
 </details>
 
+### Checkpoint: Self-Reflection
+
+- [ ] **Q1:** What happens if ALL targets in the target group fail health checks? What does the user see?
+- [ ] **Q2:** Why is the ALB in public subnets but the web servers are in private subnets?
+- [ ] **Q3:** What does `matcher = "200"` mean in the health check? What if your app returns a 302 redirect on `/`?
+
+### Check Your Progress
+
+```bash
+python run.py               # Should show ~55/100 (provider + VPC + security + ALB)
+```
+
 ---
 
 ### Step 6: Create EC2 Instances
-
-> ⏱️ **Time:** 30-35 minutes
 
 Complete `ec2.tf`:
 
@@ -1099,7 +1302,7 @@ Complete `ec2.tf`:
 - [ ] Proper security group attachments
 
 <details>
-<summary>💡 Hint: EC2 with User Data</summary>
+<summary>Hint: EC2 with User Data</summary>
 
 ```hcl
 data "aws_ami" "amazon_linux" {
@@ -1138,7 +1341,7 @@ resource "aws_instance" "web" {
 </details>
 
 <details>
-<summary>🎯 Full EC2 Solution</summary>
+<summary>Full EC2 Solution</summary>
 
 ```hcl
 # Find latest Amazon Linux 2 AMI
@@ -1237,11 +1440,21 @@ resource "aws_instance" "app" {
 
 </details>
 
+### Checkpoint: Self-Reflection
+
+- [ ] **Q1:** Why are EC2 instances placed in private subnets instead of public subnets? Users need to reach them — how does traffic get there?
+- [ ] **Q2:** What does `user_data` do? When does it run? What happens if it fails?
+- [ ] **Q3:** What does `count.index % 2` achieve? Why not just `count.index`?
+
+### Check Your Progress
+
+```bash
+python run.py               # Should show ~80/100 (provider + VPC + security + ALB + EC2)
+```
+
 ---
 
 ### Step 7: Create RDS Database
-
-> ⏱️ **Time:** 20-25 minutes
 
 Complete `rds.tf`:
 
@@ -1252,7 +1465,7 @@ Complete `rds.tf`:
 - [ ] Multi-AZ for high availability (optional)
 
 <details>
-<summary>💡 Hint: RDS Setup</summary>
+<summary>Hint: RDS Setup</summary>
 
 ```hcl
 resource "aws_db_subnet_group" "main" {
@@ -1291,7 +1504,7 @@ resource "aws_db_instance" "main" {
 </details>
 
 <details>
-<summary>🎯 Full RDS Solution</summary>
+<summary>Full RDS Solution</summary>
 
 ```hcl
 # DB Subnet Group
@@ -1342,11 +1555,26 @@ resource "aws_db_instance" "main" {
 
 </details>
 
+### Checkpoint: Self-Reflection
+
+- [ ] **Q1:** Why do we need a DB subnet group? Why can't we just specify a single subnet for RDS?
+- [ ] **Q2:** What does Multi-AZ protect against? What does it NOT protect against? (Hint: think about data corruption vs hardware failure)
+- [ ] **Q3:** Why is `publicly_accessible = false` important for a database?
+- [ ] **Q4:** The password is set with `default = "changeme123!"` in variables.tf. Why is this bad for production? How would you fix it?
+
+### Check Your Progress
+
+```bash
+python run.py               # Should show ~95-100/100
+```
+
 ---
 
 ### Step 8: Variables and Outputs
 
-Complete `variables.tf`:
+The `variables.tf` and `outputs.tf` files are already mostly complete. Review them to understand what they define:
+
+**variables.tf** — Input variables with defaults:
 
 ```hcl
 variable "aws_region" {
@@ -1435,7 +1663,7 @@ variable "allowed_ssh_cidr" {
 }
 ```
 
-Complete `outputs.tf`:
+**outputs.tf** — Values displayed after `terraform apply`:
 
 ```hcl
 output "vpc_id" {
@@ -1478,22 +1706,18 @@ output "db_name" {
 
 ## ECS Path: Containerized 3-Tier
 
-> **Note:** Complete the VPC and security group steps from EC2 path first!
+> **Note:** Complete the VPC (Step 3) and Security Groups (Step 4) from the EC2 path first! The ECS path reuses those resources.
 
-### Step 9: Create ECS Cluster and Services
+### Step 9a: Create the ECS Cluster
 
-> ⏱️ **Time:** 40-50 minutes
-
-Complete `ecs.tf`:
+Complete `ecs.tf` — start with the cluster and IAM role:
 
 **Requirements:**
-- [ ] ECS cluster
-- [ ] Task definitions for web and app tiers
-- [ ] ECS services with Fargate launch type
-- [ ] Service discovery (optional)
+- [ ] ECS cluster with container insights enabled
+- [ ] IAM execution role for ECS tasks
 
 <details>
-<summary>💡 Hint: ECS Fargate Setup</summary>
+<summary>Hint: ECS Cluster and IAM</summary>
 
 ```hcl
 resource "aws_ecs_cluster" "main" {
@@ -1532,8 +1756,16 @@ resource "aws_ecs_task_definition" "web" {
 
 </details>
 
+### Step 9b: Create Task Definitions
+
+Define what containers to run for web and app tiers. Task definitions are like Docker Compose service definitions — they specify the image, CPU, memory, ports, and environment variables.
+
+### Step 9c: Create ECS Services
+
+Services ensure the desired number of tasks (containers) are always running, and connect them to the load balancer.
+
 <details>
-<summary>🎯 Full ECS Solution</summary>
+<summary>Full ECS Solution</summary>
 
 ```hcl
 # ECS Cluster
@@ -1746,6 +1978,13 @@ resource "aws_lb_target_group" "web_ecs" {
 
 </details>
 
+### Checkpoint: Self-Reflection (ECS Path)
+
+- [ ] **Q1:** What is the difference between an ECS Task Definition and an ECS Service?
+- [ ] **Q2:** Why does the ECS target group use `target_type = "ip"` instead of `"instance"`?
+- [ ] **Q3:** What advantage does Fargate have over EC2 for this architecture? What do you NOT have to manage?
+- [ ] **Q4:** Why do we need an IAM execution role for ECS tasks? What permissions does it grant?
+
 ---
 
 ## Testing Locally with LocalStack
@@ -1863,7 +2102,7 @@ terraform init
 terraform plan
 terraform apply
 
-# ⚠️ This creates REAL resources that cost money!
+# WARNING: This creates REAL resources that cost money!
 ```
 
 ### Verify in AWS Console
@@ -1883,7 +2122,7 @@ terraform output alb_url
 curl $(terraform output -raw alb_url)
 ```
 
-### ⚠️ IMPORTANT: Clean Up!
+### IMPORTANT: Clean Up!
 
 ```bash
 # Destroy all resources when done
@@ -1920,36 +2159,88 @@ python run.py
 **Expected output when complete (EC2 path):**
 ```
 ============================================================
-  🏗️  Terraform 3-Tier Architecture Challenge
+  Terraform 3-Tier Architecture Challenge
 ============================================================
 
   Path: EC2 (Traditional)
 
-  ✅ Provider Config (5/5 points)
-  ✅ VPC & Networking (20/20 points)
-  ✅ Security Groups (10/10 points)
-  ✅ Application Load Balancer (20/20 points)
-  ✅ EC2 Instances (25/25 points)
-  ✅ RDS Database (15/15 points)
-  ✅ Variables (5/5 points)
+  [PASS] Provider Config (5/5 points)
+  [PASS] VPC & Networking (20/20 points)
+  [PASS] Security Groups (10/10 points)
+  [PASS] Application Load Balancer (20/20 points)
+  [PASS] EC2 Instances (25/25 points)
+  [PASS] RDS Database (15/15 points)
+  [PASS] Variables (5/5 points)
 
 ============================================================
-  🎯 Total Score: 100/100
-  🎉 CHALLENGE COMPLETE!
+  Total Score: 100/100
+  CHALLENGE COMPLETE!
 ============================================================
 ```
+
+For detailed output showing each individual check:
+
+```bash
+python run.py --verbose
+```
+
+---
+
+## Final Self-Reflection
+
+Before you move on, test your understanding. Try answering these without looking back:
+
+1. **Draw the 3-tier architecture from memory.** Include the VPC, all 6 subnets, the ALB, EC2/ECS instances, RDS, and security group flow. Label which subnets are public vs private.
+
+2. **Explain to a non-technical colleague** why the database is never directly accessible from the internet. Use the restaurant or onion analogy.
+
+3. **A junior engineer asks:** "Why can't we just put everything in public subnets? It's simpler." What are the 3 biggest risks of that approach?
+
+4. **Your `terraform apply` created 25 resources.** If you accidentally delete the `terraform.tfstate` file, what happens? Can Terraform still manage those resources?
+
+5. **You need to scale for Black Friday traffic.** Which tier(s) would you scale? How would you change the Terraform code? What stays the same?
+
+If you can answer all 5 confidently, you have a solid understanding of 3-tier architecture and Terraform.
+
+---
+
+## Glossary
+
+| Term | Definition |
+|------|-----------|
+| **VPC** | Virtual Private Cloud — your own isolated network in AWS, like having your own private data center. |
+| **Subnet** | A subdivision of a VPC. Each subnet lives in one Availability Zone and has a range of IP addresses. |
+| **CIDR** | Classless Inter-Domain Routing — notation for IP address ranges (e.g., `10.0.0.0/16` = 65,536 addresses). |
+| **Internet Gateway (IGW)** | Connects a VPC to the internet. Attached to public subnets. |
+| **NAT Gateway** | Allows private subnets to reach the internet (for updates, packages) without being reachable FROM the internet. |
+| **Route Table** | Rules that determine where network traffic is directed. Each subnet is associated with one route table. |
+| **Security Group** | A virtual firewall for AWS resources. Controls inbound and outbound traffic with allow rules. |
+| **ALB** | Application Load Balancer — distributes incoming HTTP/HTTPS traffic across multiple targets (EC2, ECS). |
+| **Target Group** | A group of resources (EC2 instances, IP addresses) that an ALB routes traffic to. |
+| **Listener** | A process on the ALB that checks for connection requests on a specific port and protocol. |
+| **Health Check** | Periodic requests the ALB makes to targets to verify they're healthy and can receive traffic. |
+| **Availability Zone (AZ)** | A physically separate data center within an AWS region. Using multiple AZs provides fault tolerance. |
+| **Multi-AZ** | Deploying resources across multiple AZs for high availability. If one AZ fails, the other keeps running. |
+| **EC2** | Elastic Compute Cloud — virtual servers in AWS. You choose the OS, instance type, and manage the machine. |
+| **ECS** | Elastic Container Service — runs Docker containers on AWS without managing servers (with Fargate). |
+| **Fargate** | Serverless compute engine for ECS. AWS manages the underlying servers; you just define containers. |
+| **RDS** | Relational Database Service — managed database (MySQL, PostgreSQL, etc.) with backups, patching, and failover. |
+| **AMI** | Amazon Machine Image — a template containing the OS and software for launching EC2 instances. |
+| **User Data** | A bash script that runs when an EC2 instance first boots. Used to install software and configure the server. |
+| **EIP** | Elastic IP — a static public IP address that you can assign to AWS resources like NAT Gateways. |
+| **Terraform State** | A file (`terraform.tfstate`) that tracks which real resources Terraform manages. Never delete it. |
 
 ---
 
 ## What You Learned
 
-- ✅ **3-tier architecture** - Separation of concerns
-- ✅ **VPC design** - Public/private subnets, NAT gateway
-- ✅ **Security groups** - Layered security
-- ✅ **Load balancing** - ALB with target groups
-- ✅ **Database tier** - RDS in private subnet
-- ✅ **High availability** - Multi-AZ deployment
-- ✅ **(Optional) Containers** - ECS/Fargate deployment
+- **3-tier architecture** - Separation of concerns
+- **VPC design** - Public/private subnets, NAT gateway
+- **Security groups** - Layered security (defense in depth)
+- **Load balancing** - ALB with target groups and health checks
+- **Database tier** - RDS in isolated private subnet
+- **High availability** - Multi-AZ deployment
+- **(Optional) Containers** - ECS/Fargate deployment
 
 ---
 
@@ -1957,11 +2248,115 @@ python run.py
 
 > "I built a 3-tier architecture on AWS using Terraform, including a VPC with public and private subnets, an Application Load Balancer for traffic distribution, EC2 instances for web and app tiers, and RDS MySQL for the database tier. Security groups were configured in a chain pattern where each tier only accepts traffic from the tier above it. I also implemented NAT Gateway for private subnet internet access and tested locally using LocalStack before deploying to AWS."
 
+**Follow-up questions you can now answer:**
+- "Why use private subnets for app servers?" — Defense in depth. No direct internet access reduces attack surface. Traffic is funneled through the ALB.
+- "How does the ALB know which servers are healthy?" — Health checks. The ALB periodically sends HTTP requests to each target and removes unhealthy ones from rotation.
+- "What happens if an AZ goes down?" — Multi-AZ deployment. The ALB routes traffic to healthy targets in the surviving AZ. RDS fails over to the standby in the other AZ.
+- "How would you handle database credentials in production?" — Use AWS Secrets Manager or SSM Parameter Store instead of hardcoded defaults. Reference them with `data` sources in Terraform.
+
+---
+
+## Troubleshooting
+
+<details>
+<summary>"No valid credential sources found"</summary>
+
+Terraform can't find AWS credentials.
+
+**If using LocalStack:**
+1. Make sure you copied the provider override: `cp provider_override.tf.example provider_override.tf`
+2. Run `aws configure` with dummy credentials (Access Key: `test`, Secret Key: `test`)
+3. Verify LocalStack is running: `docker-compose ps`
+
+**If using real AWS:**
+1. Run `aws configure` with your real credentials
+2. Verify with: `aws sts get-caller-identity`
+
+</details>
+
+<details>
+<summary>"Error creating VPC" or resources fail to create</summary>
+
+1. Is LocalStack running? Check: `docker-compose ps`
+2. Is LocalStack healthy? Check: `curl http://localhost:4566/_localstack/health`
+3. Did you copy the provider override? `ls provider_override.tf`
+4. Try restarting LocalStack: `docker-compose down && docker-compose up -d`
+5. Re-initialize: `terraform init`
+
+</details>
+
+<details>
+<summary>"terraform init" fails</summary>
+
+Common causes:
+1. **No internet connection** — Terraform needs to download the AWS provider
+2. **Proxy issues** — Set `HTTP_PROXY` and `HTTPS_PROXY` environment variables
+3. **Permission denied** — Run from a directory where you have write access
+4. **Version conflict** — Delete `.terraform/` and `.terraform.lock.hcl`, then run `terraform init` again
+
+</details>
+
+<details>
+<summary>"Error: Resource already exists"</summary>
+
+This means the resource exists in AWS but not in your Terraform state.
+
+1. If using LocalStack, restart it: `docker-compose down && docker-compose up -d`
+2. Remove the state: `rm terraform.tfstate terraform.tfstate.backup`
+3. Re-apply: `terraform apply`
+
+**Warning:** Only do this with LocalStack or test environments. Never delete state in production.
+
+</details>
+
+<details>
+<summary>"Error acquiring the state lock"</summary>
+
+Another Terraform process is running, or a previous run crashed without releasing the lock.
+
+```bash
+# Force unlock (only if you're sure no other process is running)
+terraform force-unlock <LOCK_ID>
+```
+
+The lock ID is shown in the error message.
+
+</details>
+
+<details>
+<summary>LocalStack container won't start or keeps restarting</summary>
+
+1. Is Docker running? Check Docker Desktop or `docker ps`
+2. Is port 4566 already in use? Check: `netstat -an | grep 4566`
+3. Try removing old data: `docker-compose down -v && docker-compose up -d`
+4. Check logs: `docker-compose logs localstack`
+
+</details>
+
+<details>
+<summary>"python run.py" shows 0 points even after writing code</summary>
+
+1. Make sure you **uncommented** the code (remove the `#` at the start of lines)
+2. Check for syntax errors: `terraform validate`
+3. Run with verbose output: `python run.py --verbose` to see which specific checks fail
+4. Make sure you saved the files
+
+</details>
+
 ---
 
 ## Next Steps
 
-- **2.4 CI/CD Pipeline** - Automate deployments with GitHub Actions
-- **2.5 Monitoring Stack** - Add CloudWatch, alerts, and dashboards
+Continue your infrastructure journey:
 
-Good luck! 🏗️
+| Next Step | What You'll Learn |
+|-----------|------------------|
+| **CI/CD Pipeline** | Automate Terraform deployments with GitHub Actions |
+| **Monitoring Stack** | Add CloudWatch alarms, Grafana dashboards, and alerting |
+| **Terraform Modules** | Refactor this code into reusable modules |
+| **Kubernetes** | Deploy containers at scale with EKS |
+
+**Recommended path:**
+1. **CI/CD Pipeline** — Automate `terraform plan` on PRs and `terraform apply` on merge
+2. **Monitoring** — Add CloudWatch metrics and alerts for each tier
+3. **Terraform Modules** — Package your VPC, ALB, and compute tiers as reusable modules

@@ -1,0 +1,41 @@
+{
+  "id": "terraform-3tier",
+  "title": "Terraform 3-Tier Architecture",
+  "description": "Build a production-ready 3-tier web application infrastructure on AWS using Terraform, including VPC, ALB, EC2/ECS, and RDS with security best practices.",
+  "category": "devops",
+  "difficulty": "intermediate",
+  "estimated_time": "3-4 hours",
+  "points": 100,
+  "order": 4,
+  "prerequisites": [
+    "Terraform Basics challenge (or equivalent)",
+    "Understanding of VPCs, subnets, security groups",
+    "Basic networking concepts (public vs private)"
+  ],
+  "skills_learned": [
+    "3-tier architecture design and implementation",
+    "VPC design with public, private, and isolated subnets",
+    "Security group chaining (defense in depth)",
+    "Application Load Balancer with target groups and health checks",
+    "EC2 instances with user data scripts",
+    "RDS database in isolated subnets",
+    "Multi-AZ high availability",
+    "LocalStack for local AWS testing",
+    "(Optional) ECS Fargate containerized deployment"
+  ],
+  "tech_stack": {
+    "language": "hcl",
+    "version": "1.0+",
+    "tools": ["Terraform", "Docker", "LocalStack", "AWS CLI"],
+    "services": ["VPC", "EC2", "ALB", "RDS", "ECS"]
+  },
+  "grading": {
+    "provider_config": 5,
+    "vpc_networking": 20,
+    "security_groups": 10,
+    "alb": 20,
+    "compute": 25,
+    "rds": 15,
+    "variables": 5
+  }
+}
