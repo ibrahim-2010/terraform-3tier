@@ -2083,6 +2083,32 @@ aws --endpoint-url=http://localhost:4566 rds describe-db-instances \
   --output table
 ```
 
+### Automated Verification
+
+Instead of running the CLI commands above manually, you can verify all resources at once:
+
+```bash
+python run.py --verify
+```
+
+This checks LocalStack for VPCs, subnets, security groups, ALB, target groups, EC2 instances, and RDS — and reports what's missing.
+
+### Web Tier Preview
+
+After running `docker-compose up -d` and `terraform apply`, visit:
+
+**http://localhost:3000**
+
+This shows a preview of what the ALB would serve in production (the Web Tier page from your EC2 instances).
+
+> **Why a preview instead of the real ALB URL?**
+>
+> LocalStack Community Edition creates ALB resources via the API (you can see them with `describe-load-balancers`), but it does **not** route real HTTP traffic through the ALB. This is a known limitation of the free tier — the ALB is registered as a resource, but visiting its DNS name returns a **502 Bad Gateway** because no actual load balancer process is running behind it.
+>
+> The preview container (`web-preview` in docker-compose) serves the same page that the EC2 user_data script would create, so you can see what your infrastructure would look like on real AWS.
+>
+> To verify your ALB configuration is correct, use `python run.py --verify` or the CLI commands above.
+
 ### Visual Dashboard
 
 ```bash
@@ -2387,6 +2413,40 @@ terraform force-unlock <LOCK_ID>
 ```
 
 The lock ID is shown in the error message.
+
+</details>
+
+<details>
+<summary>502 Bad Gateway when accessing the ALB URL</summary>
+
+**If using LocalStack (most common):**
+
+This is expected behavior. LocalStack Community Edition creates ALB resources via the API but does **not** route real HTTP traffic through them. The ALB DNS name is registered, but no actual load balancer process runs behind it.
+
+**What to do instead:**
+1. Use the web preview: visit **http://localhost:3000** to see the simulated web tier page
+2. Verify your resources with: `python run.py --verify`
+3. Verify with CLI: `aws --endpoint-url=http://localhost:4566 elbv2 describe-load-balancers --output table`
+
+Your Terraform configuration is correct — the 502 is a LocalStack limitation, not a bug in your code.
+
+**If using real AWS:**
+
+A 502 on real AWS means the ALB can't reach healthy backend instances. Check these in order:
+
+1. **Wait 1-2 minutes** — After `terraform apply`, EC2 instances need time to boot, run user_data (install Apache), and pass health checks (2 checks x 30s = 60s minimum)
+2. **Check target health** — In AWS Console > EC2 > Target Groups > your target group > Targets tab. If targets show "unhealthy", the issue is below.
+3. **Check security groups** — The web security group must allow port 80 from the ALB security group (not a CIDR block). Run:
+   ```bash
+   aws ec2 describe-security-groups --group-ids <web-sg-id> --query "SecurityGroups[*].IpPermissions"
+   ```
+4. **Check NAT Gateway** — EC2 instances are in private subnets and need NAT Gateway for internet access. Without it, `yum install httpd` in user_data fails silently and Apache never starts. Verify your NAT Gateway exists and the private route table has a route to it.
+5. **Check user_data logs** — SSH into an EC2 instance and check:
+   ```bash
+   cat /var/log/cloud-init-output.log
+   systemctl status httpd
+   curl localhost
+   ```
 
 </details>
 

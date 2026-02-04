@@ -7,6 +7,7 @@ Validates your Terraform configuration and tracks your progress.
 Usage:
     python run.py           # Check progress
     python run.py --verbose # Show detailed output
+    python run.py --verify  # Verify deployed resources in LocalStack
 """
 
 import os
@@ -404,6 +405,161 @@ def check_ecs_config():
     return points, checks
 
 
+def aws_cli_query(service_cmd, query=None):
+    """Run an AWS CLI command against LocalStack and return parsed JSON output."""
+    endpoint = "http://localhost:4566"
+    cmd = [
+        'aws', '--endpoint-url', endpoint,
+        '--region', 'us-east-1',
+        '--no-cli-pager',
+        '--output', 'json',
+    ] + service_cmd
+    if query:
+        cmd += ['--query', query]
+
+    try:
+        env = os.environ.copy()
+        env.setdefault('AWS_ACCESS_KEY_ID', 'test')
+        env.setdefault('AWS_SECRET_ACCESS_KEY', 'test')
+        env.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=env)
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout)
+        return None
+    except Exception:
+        return None
+
+
+def verify_localstack_resources():
+    """Verify deployed resources in LocalStack using AWS CLI."""
+    print(f"\n{Colors.CYAN}{'='*60}{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.CYAN}  LocalStack Infrastructure Verification{Colors.END}")
+    print(f"{Colors.CYAN}{'='*60}{Colors.END}\n")
+
+    # Check if LocalStack is reachable
+    try:
+        import urllib.request
+        resp = urllib.request.urlopen('http://localhost:4566/_localstack/health', timeout=5)
+        health = json.loads(resp.read().decode())
+        print(f"  {Colors.GREEN}[OK]{Colors.END} LocalStack is running")
+    except Exception:
+        print(f"  {Colors.RED}[X]{Colors.END} LocalStack is not reachable at localhost:4566")
+        print(f"      Run: docker-compose up -d")
+        return
+
+    # Check AWS CLI availability
+    try:
+        subprocess.run(['aws', '--version'], capture_output=True, timeout=5)
+    except FileNotFoundError:
+        print(f"  {Colors.RED}[X]{Colors.END} AWS CLI not installed (needed for --verify)")
+        print(f"      Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html")
+        return
+
+    all_ok = True
+
+    # 1. Check VPCs
+    vpcs = aws_cli_query(['ec2', 'describe-vpcs'], 'Vpcs[*].{Id:VpcId,Cidr:CidrBlock}')
+    if vpcs and len(vpcs) > 0:
+        print(f"  {Colors.GREEN}[OK]{Colors.END} VPC created ({len(vpcs)} found)")
+        for v in vpcs:
+            print(f"      - {v.get('Id', 'N/A')} ({v.get('Cidr', 'N/A')})")
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No VPCs found")
+        all_ok = False
+
+    # 2. Check Subnets
+    subnets = aws_cli_query(['ec2', 'describe-subnets'], 'Subnets[*].{Id:SubnetId,Cidr:CidrBlock,AZ:AvailabilityZone}')
+    if subnets and len(subnets) >= 6:
+        print(f"  {Colors.GREEN}[OK]{Colors.END} Subnets created ({len(subnets)} found, expected 6)")
+    elif subnets and len(subnets) > 0:
+        print(f"  {Colors.YELLOW}[!]{Colors.END} Subnets created ({len(subnets)} found, expected 6)")
+        all_ok = False
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No subnets found")
+        all_ok = False
+
+    # 3. Check Security Groups (excluding default)
+    sgs = aws_cli_query(['ec2', 'describe-security-groups'],
+                        'SecurityGroups[?GroupName!=`default`].{Id:GroupId,Name:GroupName}')
+    if sgs and len(sgs) >= 4:
+        print(f"  {Colors.GREEN}[OK]{Colors.END} Security groups created ({len(sgs)} found)")
+        for sg in sgs:
+            print(f"      - {sg.get('Name', 'N/A')} ({sg.get('Id', 'N/A')})")
+    elif sgs and len(sgs) > 0:
+        print(f"  {Colors.YELLOW}[!]{Colors.END} Security groups ({len(sgs)} found, expected 4: alb, web, app, db)")
+        all_ok = False
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No security groups found")
+        all_ok = False
+
+    # 4. Check ALB
+    albs = aws_cli_query(['elbv2', 'describe-load-balancers'],
+                         'LoadBalancers[*].{Name:LoadBalancerName,DNS:DNSName,State:State.Code}')
+    if albs and len(albs) > 0:
+        alb = albs[0]
+        print(f"  {Colors.GREEN}[OK]{Colors.END} ALB created: {alb.get('Name', 'N/A')}")
+        print(f"      DNS: {alb.get('DNS', 'N/A')}")
+        print(f"      State: {alb.get('State', 'N/A')}")
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No ALB found")
+        all_ok = False
+
+    # 5. Check Target Groups
+    tgs = aws_cli_query(['elbv2', 'describe-target-groups'],
+                        'TargetGroups[*].{Name:TargetGroupName,Port:Port,Protocol:Protocol}')
+    if tgs and len(tgs) > 0:
+        tg = tgs[0]
+        print(f"  {Colors.GREEN}[OK]{Colors.END} Target group created: {tg.get('Name', 'N/A')} (port {tg.get('Port', 'N/A')})")
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No target groups found")
+        all_ok = False
+
+    # 6. Check EC2 instances
+    instances = aws_cli_query(['ec2', 'describe-instances',
+                               '--filters', 'Name=instance-state-name,Values=running'],
+                              'Reservations[*].Instances[*].{Id:InstanceId,Type:InstanceType,IP:PrivateIpAddress}')
+    # Flatten the nested list
+    flat_instances = []
+    if instances:
+        for reservation in instances:
+            if isinstance(reservation, list):
+                flat_instances.extend(reservation)
+            elif isinstance(reservation, dict):
+                flat_instances.append(reservation)
+
+    if flat_instances and len(flat_instances) >= 2:
+        print(f"  {Colors.GREEN}[OK]{Colors.END} EC2 instances running ({len(flat_instances)} found)")
+        for inst in flat_instances:
+            print(f"      - {inst.get('Id', 'N/A')} ({inst.get('Type', 'N/A')}, IP: {inst.get('IP', 'N/A')})")
+    elif flat_instances:
+        print(f"  {Colors.YELLOW}[!]{Colors.END} EC2 instances ({len(flat_instances)} found, expected 4: 2 web + 2 app)")
+        all_ok = False
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No running EC2 instances found")
+        all_ok = False
+
+    # 7. Check RDS
+    dbs = aws_cli_query(['rds', 'describe-db-instances'],
+                        'DBInstances[*].{Id:DBInstanceIdentifier,Engine:Engine,Status:DBInstanceStatus}')
+    if dbs and len(dbs) > 0:
+        db = dbs[0]
+        print(f"  {Colors.GREEN}[OK]{Colors.END} RDS instance created: {db.get('Id', 'N/A')} ({db.get('Engine', 'N/A')})")
+    else:
+        print(f"  {Colors.RED}[X]{Colors.END} No RDS instances found")
+        all_ok = False
+
+    # Summary
+    print(f"\n{Colors.CYAN}{'='*60}{Colors.END}")
+    if all_ok:
+        print(f"  {Colors.GREEN}{Colors.BOLD}All infrastructure resources verified!{Colors.END}")
+        print(f"\n  {Colors.CYAN}Web Preview:{Colors.END} http://localhost:3000")
+        print(f"  (This is a simulated page. LocalStack does not route real")
+        print(f"   traffic through the ALB. See README for details.)")
+    else:
+        print(f"  {Colors.YELLOW}Some resources are missing. Run 'terraform apply' first.{Colors.END}")
+    print(f"{Colors.CYAN}{'='*60}{Colors.END}\n")
+
+
 def run_terraform_validate():
     """Run terraform validate to check syntax."""
     try:
@@ -450,9 +606,16 @@ def print_section(title, points, max_points, checks, verbose=False):
 def main():
     parser = argparse.ArgumentParser(description='Check your Terraform 3-Tier challenge progress')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output')
+    parser.add_argument('--verify', action='store_true',
+                        help='Verify deployed resources in LocalStack via AWS CLI')
     args = parser.parse_args()
 
     print_header()
+
+    # If --verify flag, run infrastructure verification and exit
+    if args.verify:
+        verify_localstack_resources()
+        return 0
 
     # Determine which path the user is taking
     ec2_content = read_file('ec2.tf')
