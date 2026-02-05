@@ -1,18 +1,28 @@
 # LocalStack for 3-Tier Architecture Testing
 # ===========================================
 # Simulates AWS services locally for development/testing
+#
+# LocalStack Community Edition supports: EC2, VPC, IAM, STS, S3, Security Groups
+# LocalStack Pro (paid) adds: ELBv2 (ALB), RDS, ECS, and more
+#
+# What this means for you:
+# - VPC, subnets, security groups, and EC2 instances will work with terraform apply
+# - ALB and RDS will NOT work on Community — use terraform validate + python run.py
+# - See the web-preview container below for a simulated web tier page
 
 version: '3.8'
 
 services:
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3.7.2
     container_name: terraform-3tier-localstack
     ports:
       - "4566:4566"            # LocalStack Gateway
       - "4510-4559:4510-4559"  # External services port range
     environment:
-      # AWS Services to enable
+      # AWS Services to enable (Community supports: ec2, iam, sts, s3, cloudwatch, logs)
+      # Note: elbv2 and rds require LocalStack Pro — they are listed here but will
+      # return 501 errors on Community Edition. This is expected.
       - SERVICES=ec2,elbv2,rds,iam,sts,cloudwatch,logs,s3,secretsmanager
 
       # Debug mode (set to 1 for verbose logging)
@@ -46,10 +56,8 @@ services:
 
   # Web Tier Preview
   # ================
-  # Simulates what the ALB would serve in production.
-  # LocalStack Community Edition creates ALB resources via API but does NOT
-  # route real HTTP traffic through them. This nginx container serves a
-  # preview page so you can see what the web tier would look like.
+  # Since LocalStack Community cannot run a real ALB, this nginx container
+  # serves a preview of what the web tier page would look like in production.
   #
   # Access at: http://localhost:3000
   web-preview:

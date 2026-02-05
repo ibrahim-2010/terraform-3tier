@@ -17,6 +17,13 @@
 # - Create an HTTP listener on port 80
 # - Attach EC2 instances to the target group
 #
+# LocalStack Note:
+# - elbv2 (ALB) is a LocalStack PRO feature — it is NOT available in Community Edition.
+# - You should still write and uncomment this code (it will be validated by run.py
+#   and terraform validate), but `terraform apply` will fail for ALB resources on
+#   LocalStack Community. This is expected. On real AWS, it works normally.
+# - To see what the ALB would serve, visit http://localhost:3000 (web preview).
+#
 # See README.md for detailed guidance!
 
 # =============================================================================

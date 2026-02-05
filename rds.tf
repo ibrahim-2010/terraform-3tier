@@ -17,6 +17,12 @@
 # - Configure encryption and backups
 # - Place in private subnets with DB security group
 #
+# LocalStack Note:
+# - rds is a LocalStack PRO feature — it is NOT available in Community Edition.
+# - You should still write and uncomment this code (it will be validated by run.py
+#   and terraform validate), but `terraform apply` will fail for RDS resources on
+#   LocalStack Community. This is expected. On real AWS, it works normally.
+#
 # See README.md for detailed guidance!
 
 # =============================================================================

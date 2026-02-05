@@ -627,13 +627,25 @@ Internet ──► ALB (port 80/443)
 
 ### What is LocalStack?
 
-**LocalStack is a fake AWS that runs on your laptop.** It simulates AWS services (VPC, EC2, RDS, etc.) locally so you can test your Terraform code without:
+**LocalStack is a fake AWS that runs on your laptop.** It simulates AWS services locally so you can test your Terraform code without:
 - Needing an AWS account
 - Paying for any resources
 - Waiting for real infrastructure to provision
 - Accidentally leaving resources running and getting charged
 
 It works by running a Docker container that exposes the same API endpoints as AWS, but everything stays on your machine.
+
+> **Important: LocalStack Community vs Pro**
+>
+> LocalStack **Community Edition** (free, what we use) supports: **EC2, VPC, Subnets, Security Groups, IAM, S3, CloudWatch**.
+>
+> LocalStack **Pro** (paid) adds: **ELBv2 (ALB), RDS, ECS**, and more.
+>
+> **What this means for you:**
+> - `terraform apply` will successfully create VPCs, subnets, security groups, and EC2 instances
+> - `terraform apply` will **fail** on ALB and RDS resources with a `501` error — this is expected, not a bug in your code
+> - Your ALB and RDS code is validated by `python run.py` and `terraform validate` instead
+> - Visit **http://localhost:3000** after `docker-compose up -d` for a preview of the web tier page
 
 ### How the Provider Override Works
 
@@ -662,8 +674,9 @@ curl http://localhost:4566/_localstack/health
 
 **Expected output:**
 ```json
-{"services": {"ec2": "running", "elbv2": "running", "rds": "running", ...}}
+{"services": {"ec2": "running", "iam": "running", "sts": "running", ...}}
 ```
+> Note: `elbv2` and `rds` may show as `"available"` in the health check but will return `501` errors when you try to create resources — this is a Community Edition limitation.
 
 ### Activate the Provider Override
 
@@ -1305,9 +1318,11 @@ resource "aws_lb_target_group_attachment" "web" {
 ### Check Your Progress (LocalStack)
 
 ```bash
-terraform apply             # Apply to LocalStack (free, local only)
+terraform validate          # Check syntax (works for all resources)
 python run.py               # Should show ~55/100 (provider + VPC + security + ALB)
 ```
+
+> Note: `terraform apply` will fail for ALB resources on LocalStack Community (501 error). This is expected — elbv2 is a Pro-only service. Your ALB code is validated by `python run.py` and `terraform validate`.
 
 ---
 
@@ -1469,7 +1484,8 @@ resource "aws_instance" "app" {
 ### Check Your Progress (LocalStack)
 
 ```bash
-terraform apply             # Apply to LocalStack (free, local only)
+terraform validate          # Check syntax (works for all resources)
+terraform apply             # VPC/SG/EC2 will succeed; ALB will fail (expected on Community)
 python run.py               # Should show ~80/100 (provider + VPC + security + ALB + EC2)
 ```
 
@@ -1586,15 +1602,19 @@ resource "aws_db_instance" "main" {
 ### Check Your Progress (LocalStack)
 
 ```bash
-terraform apply             # Apply to LocalStack (free, local only)
+terraform validate          # Check syntax (works for all resources)
 python run.py               # Should show ~95-100/100
 ```
+
+> Note: `terraform apply` will fail for RDS resources on LocalStack Community (501 error). This is expected — rds is a Pro-only service. Your RDS code is validated by `python run.py` and `terraform validate`.
 
 ---
 
 ### Step 8: Variables and Outputs
 
-The `variables.tf` and `outputs.tf` files are already mostly complete. Review them to understand what they define:
+The `variables.tf` file is already complete with all needed variables. The `outputs.tf` file contains commented-out outputs organized by section — **uncomment outputs as you uncomment the corresponding resources**. On LocalStack Community, keep ALB and RDS outputs commented since those resources can't be created.
+
+Review the variables to understand what they define:
 
 **variables.tf** — Input variables with defaults:
 
@@ -2017,9 +2037,21 @@ resource "aws_lb_target_group" "web_ecs" {
 
 > **🖥️ ENVIRONMENT: LocalStack (Local Testing)** — This entire section runs on your machine. No AWS costs.
 
-If you've been running `terraform apply` after each step (recommended), your resources are already created. This section is a summary of how to do a full deploy from scratch, or a reset if you want to start over.
+### LocalStack Community Limitations
 
-### Run Terraform (Full LocalStack Deploy)
+LocalStack **Community Edition** (free) does **not** support `elbv2` (ALB) or `rds`. These are **Pro-only** services. This means:
+
+| Resource | `terraform apply` on LocalStack Community | How to validate |
+|----------|------------------------------------------|-----------------|
+| VPC, Subnets, IGW, NAT, Route Tables | Works | `terraform apply` + CLI |
+| Security Groups | Works | `terraform apply` + CLI |
+| EC2 Instances | Works | `terraform apply` + CLI |
+| **ALB, Target Groups, Listeners** | **Fails (501 error)** | `python run.py` + `terraform validate` |
+| **RDS, DB Subnet Group** | **Fails (501 error)** | `python run.py` + `terraform validate` |
+
+**The 501 errors on ALB and RDS are expected** — they are not bugs in your code.
+
+### Recommended Workflow (LocalStack Community)
 
 ```bash
 # 1. Start LocalStack (skip if already running)
@@ -2031,30 +2063,36 @@ cp provider_override.tf.example provider_override.tf
 # 3. Initialize Terraform (skip if already done)
 terraform init
 
-# 4. Preview resources
-terraform plan
+# 4. Validate your code (checks syntax and references — works for ALL resources)
+terraform validate
 
-# 5. Create resources (hits LocalStack, not real AWS)
+# 5. Check your progress (reads your .tf files — works for ALL resources)
+python run.py --verbose
+
+# 6. Apply what LocalStack supports (VPC, subnets, SGs, EC2)
+#    ALB and RDS will show errors — that's expected on Community Edition
 terraform apply
 # Type "yes" to confirm
+
+# 7. See the web tier preview
+#    Open http://localhost:3000 in your browser
 ```
 
-**Expected output:**
+**Expected `terraform apply` output on LocalStack Community:**
 ```
-Apply complete! Resources: 25 added, 0 changed, 0 destroyed.
+Apply complete! Resources: ~15 added, 0 changed, 0 destroyed.
 
-Outputs:
-
-alb_dns_name = "terraform-3tier-alb-123456789.us-east-1.elb.localhost.localstack.cloud"
-alb_url = "http://terraform-3tier-alb-123456789.us-east-1.elb.localhost.localstack.cloud"
-db_endpoint = "terraform-3tier-db.xyz123.us-east-1.rds.localhost.localstack.cloud:3306"
-vpc_id = "vpc-abc123"
-web_instance_ids = ["i-web1", "i-web2"]
+# You will also see errors like:
+# Error: ... elbv2 ... not included in your current license plan
+# Error: ... rds ... not included in your current license plan
+# These are EXPECTED — ALB and RDS require LocalStack Pro.
 ```
 
-### Verify with CLI (LocalStack)
+> **Your score comes from `python run.py`**, which checks your `.tf` files for correct code structure. It works the same whether you're using LocalStack or real AWS — it reads your code, not your running infrastructure. The ALB/RDS errors from `terraform apply` do not affect your score.
 
-Notice how every command below uses `--endpoint-url=http://localhost:4566` — this targets LocalStack, not real AWS.
+### Verify Deployed Resources with CLI (LocalStack)
+
+These commands verify resources that LocalStack Community supports. They use `--endpoint-url=http://localhost:4566` to target LocalStack.
 
 ```bash
 # List all VPCs
@@ -2072,26 +2110,21 @@ aws --endpoint-url=http://localhost:4566 ec2 describe-instances \
   --query "Reservations[*].Instances[*].{InstanceId:InstanceId,Type:InstanceType,Tier:Tags[?Key=='Tier']|[0].Value,State:State.Name}" \
   --output table
 
-# List Load Balancers
-aws --endpoint-url=http://localhost:4566 elbv2 describe-load-balancers \
-  --query "LoadBalancers[*].{Name:LoadBalancerName,DNS:DNSName,Type:Type}" \
-  --output table
-
-# List RDS instances
-aws --endpoint-url=http://localhost:4566 rds describe-db-instances \
-  --query "DBInstances[*].{Identifier:DBInstanceIdentifier,Engine:Engine,Status:DBInstanceStatus}" \
+# List Security Groups
+aws --endpoint-url=http://localhost:4566 ec2 describe-security-groups \
+  --query "SecurityGroups[?GroupName!='default'].{Name:GroupName,Id:GroupId}" \
   --output table
 ```
 
 ### Automated Verification
 
-Instead of running the CLI commands above manually, you can verify all resources at once:
+Instead of running the CLI commands above manually, you can verify all deployed resources at once:
 
 ```bash
 python run.py --verify
 ```
 
-This checks LocalStack for VPCs, subnets, security groups, ALB, target groups, EC2 instances, and RDS — and reports what's missing.
+This checks LocalStack for VPCs, subnets, security groups, and EC2 instances. ALB and RDS checks will show as unavailable on Community Edition — that's expected.
 
 ### Web Tier Preview
 
@@ -2126,7 +2159,9 @@ Opens a web page at http://localhost:8080 showing:
 
 ## Challenge Complete — What's Next?
 
-If you've reached **100/100 on `python run.py`**, congratulations — **the challenge is done!** Everything above ran against LocalStack on your machine. No AWS account was needed, and nothing cost money.
+If you've reached **100/100 on `python run.py`**, congratulations — **the challenge is done!** Your Terraform code is correct and complete. Everything was validated locally — no AWS account needed and nothing cost money.
+
+> Note: On LocalStack Community, `terraform apply` only fully works for VPC/subnets/security groups/EC2. The ALB and RDS 501 errors are expected (Pro-only services) and do **not** affect your score. Your code is validated by `python run.py` and `terraform validate`.
 
 **You can stop here.** The section below is entirely optional.
 
@@ -2386,6 +2421,23 @@ Common causes:
 2. **Proxy issues** — Set `HTTP_PROXY` and `HTTPS_PROXY` environment variables
 3. **Permission denied** — Run from a directory where you have write access
 4. **Version conflict** — Delete `.terraform/` and `.terraform.lock.hcl`, then run `terraform init` again
+
+</details>
+
+<details>
+<summary>501 error: "not included in your current license plan" (elbv2/rds)</summary>
+
+This is **expected behavior** on LocalStack Community Edition. The `elbv2` (ALB) and `rds` services are **Pro-only** features.
+
+**Your code is NOT broken.** The 501 means LocalStack doesn't support these services in the free tier.
+
+**What to do:**
+1. Ignore the 501 errors from `terraform apply` — they only affect ALB and RDS
+2. VPC, subnets, security groups, and EC2 should still create successfully
+3. Validate your ALB and RDS code with: `terraform validate` and `python run.py --verbose`
+4. Your score comes from `python run.py`, which reads your code, not running infrastructure
+
+**If you want full `terraform apply` to work locally**, you need [LocalStack Pro](https://localstack.cloud/pricing) (paid). Otherwise, deploy to real AWS (see the optional section below).
 
 </details>
 
