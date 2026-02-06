@@ -22,13 +22,24 @@ By the end of this challenge, you will be able to:
 
 > **Read this first!** This guide is designed to be followed **step by step, in order**. Don't skip ahead.
 
-| Step | What You'll Do | Time |
-|------|---------------|------|
-| **Step 0** | Install tools (Terraform, Docker, AWS CLI) | 10-15 min |
-| **Step 1** | Learn the architecture (reading only) | 15-20 min |
-| **Step 2** | Set up LocalStack (local AWS simulator) | 5 min |
-| **Steps 3-8** | Write Terraform code (the actual challenge) | 1-2 hours |
-| **(Optional)** | Deploy to real AWS | 30 min |
+| Step | What You'll Do | Environment | Cost |
+|------|---------------|-------------|------|
+| **Step 0** | Install tools (Terraform, Docker, AWS CLI) | Your laptop | Free |
+| **Step 1** | Learn the architecture (reading only) | Your laptop | Free |
+| **Step 2** | Set up LocalStack (local AWS simulator) | Your laptop | Free |
+| **Steps 3-8** | Write Terraform code (the actual challenge) | **LocalStack** | Free |
+| **(Optional)** | Deploy to real AWS | **Real AWS** | ~$95/month |
+
+> **LocalStack vs Real AWS — Know the difference!**
+>
+> | | LocalStack (Steps 0-8) | Real AWS (Optional section) |
+> |---|---|---|
+> | **Where it runs** | Your laptop (Docker container) | Amazon's cloud |
+> | **Cost** | Free | ~$95/month |
+> | **File to check** | `provider_override.tf` exists | `provider_override.tf` deleted |
+> | **When to use** | Learning, testing, this challenge | Production, final verification |
+>
+> **Steps 3-8 use LocalStack only.** You will NOT touch real AWS until you explicitly choose to in the optional section at the end.
 
 **After each coding step (Steps 3-8), always run:**
 ```bash
@@ -36,14 +47,14 @@ terraform validate     # Check for syntax errors
 python run.py          # Check your score (should increase after each step)
 ```
 
-**Your progress:**
+**Your progress (all on LocalStack — free, no AWS account needed):**
 - Start: `python run.py` shows **0/100**
 - After Step 3 (VPC): ~25/100
 - After Step 4 (Security): ~35/100
 - After Step 5 (ALB): ~55/100
 - After Step 6 (EC2): ~80/100
 - After Step 7 (RDS): ~95/100
-- After Step 8 (Variables): **100/100**
+- After Step 8 (Variables): **100/100** — Challenge complete!
 
 ---
 
