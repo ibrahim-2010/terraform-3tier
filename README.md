@@ -2278,10 +2278,36 @@ aws ec2 describe-vpcs --filters "Name=tag:Project,Values=terraform-3tier"
 
 ## Run the Progress Checker
 
-> `python run.py` checks your `.tf` files for correct structure. It works the same whether you're using LocalStack or real AWS — it reads your code, not your running infrastructure.
+> `python run.py` checks your `.tf` files for correct structure. It works the same whether you're using LocalStack or real AWS — it reads your **uncommented code**, not your running infrastructure.
 
 ```bash
 python run.py
+```
+
+**When to run it:**
+- **At the start** → See 0/100 (all code is commented in the starter template)
+- **After each step** → See your score increase as you uncomment code
+- **When complete** → See 100/100
+
+**Starting output (before you've done any work):**
+```
+============================================================
+  Terraform 3-Tier Architecture Challenge
+============================================================
+
+  Path: EC2 (Traditional)
+
+  [FAIL] Provider Config (0/5 points)
+  [FAIL] VPC & Networking (0/20 points)
+  [FAIL] Security Groups (0/10 points)
+  [FAIL] Application Load Balancer (0/20 points)
+  [FAIL] EC2 Instances (0/25 points)
+  [FAIL] RDS Database (0/15 points)
+  [FAIL] Variables (0/5 points)
+
+============================================================
+  Total Score: 0/100
+============================================================
 ```
 
 **Expected output when complete (EC2 path):**
