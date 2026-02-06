@@ -2336,93 +2336,186 @@ If you can answer all 5 confidently, you have a solid understanding of 3-tier ar
 
 > **When to do this:** Only after deploying to **real AWS** and successfully accessing your ALB URL in a browser. This does NOT work on LocalStack.
 >
-> **What you'll see first:** The default nginx or Apache welcome page. This means your infrastructure is working correctly!
+> **What you'll see first:** The default nginx or Apache "Welcome" page. **This means your infrastructure is working correctly!** You can stop here — the challenge is complete.
 >
-> **What this bonus does:** Replace the default page with a custom page showing instance metadata, proving the ALB is load balancing.
+> **What this bonus does:** Replace the default page with a custom page that shows which EC2 instance served the request, proving the ALB is load balancing between servers.
 
-If your ALB URL (`terraform-3tier-alb-xxx.us-east-1.elb.amazonaws.com`) shows the default web server page, your infrastructure is working. This optional step customizes that page.
+---
 
-### SSH into a Web Instance
+### Why SSH into the Server?
 
-First, connect to one of your web EC2 instances. Since they're in private subnets, you'll need either:
-- **AWS Systems Manager Session Manager** (recommended, no bastion needed)
-- A bastion host in a public subnet
+The web page files live **inside** each EC2 instance. To change what the web server displays, you need to:
+1. Connect to the EC2 instance (SSH)
+2. Edit the HTML file that the web server serves
+3. The web server (Apache or nginx) automatically serves the updated file
+
+**File locations:**
+- **Apache (httpd):** `/var/www/html/index.html`
+- **nginx:** `/usr/share/nginx/html/index.html`
+
+---
+
+### Step 1: Find Your Web Instance IDs
+
+In your terminal (on your local machine), run:
 
 ```bash
-# Using Session Manager (if you added the IAM role):
-aws ssm start-session --target i-xxxxxxxxx
-
-# Or via bastion:
-ssh -J ec2-user@bastion-ip ec2-user@web-instance-private-ip
+# Get the instance IDs of your web servers
+aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=*web*" "Name=instance-state-name,Values=running" \
+  --query "Reservations[*].Instances[*].[InstanceId,PrivateIpAddress,Tags[?Key=='Name'].Value|[0]]" \
+  --output table
 ```
 
-### Create Custom Page (Apache httpd)
+You should see 2 web instances. Note both Instance IDs (e.g., `i-0abc123...` and `i-0def456...`).
+
+---
+
+### Step 2: Connect to a Web Instance
+
+Your web instances are in **private subnets** (no public IP), so you can't SSH directly. Use one of these methods:
+
+**Option A: AWS Systems Manager Session Manager (Recommended)**
+
+This works if your EC2 instances have the SSM agent and proper IAM role.
 
 ```bash
-# Get instance metadata
+# Replace with your actual instance ID
+aws ssm start-session --target i-0abc123def456
+```
+
+**Option B: EC2 Instance Connect (via AWS Console)**
+
+1. Go to AWS Console → EC2 → Instances
+2. Select your web instance
+3. Click "Connect" → "EC2 Instance Connect" tab → "Connect"
+
+**Option C: SSH via Bastion Host**
+
+If you have a bastion host in a public subnet:
+
+```bash
+ssh -J ec2-user@<bastion-public-ip> ec2-user@<web-instance-private-ip>
+```
+
+---
+
+### Step 3: Create the Custom Page
+
+Once you're connected to the EC2 instance (you'll see a prompt like `[ec2-user@ip-10-0-10-4 ~]$`), run these commands:
+
+**For Apache (httpd) — this is what the starter code uses:**
+
+```bash
+# Step 3a: Get this instance's metadata from AWS
 INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
 AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
 LOCAL_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
 
-# Create custom page
-cat <<EOF | sudo tee /var/www/html/index.html
+# Step 3b: Verify the variables are set (you should see values printed)
+echo "Instance: $INSTANCE_ID, AZ: $AZ, IP: $LOCAL_IP"
+
+# Step 3c: Create the custom HTML page
+# This command writes the HTML to the Apache web root
+sudo tee /var/www/html/index.html > /dev/null <<EOF
 <!DOCTYPE html>
 <html>
 <head>
   <title>Web Tier - 3-Tier Demo</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-    .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 600px; }
+    .container { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto; }
     h1 { color: #232f3e; }
     .tier { background: #ff9900; color: white; padding: 5px 15px; border-radius: 5px; display: inline-block; }
-    .info { margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 5px; }
-    .info p { margin: 5px 0; }
-    pre { background: #232f3e; color: #f5f5f5; padding: 15px; border-radius: 5px; }
+    .info { margin-top: 20px; padding: 15px; background: #e8f4e8; border: 1px solid #4caf50; border-radius: 5px; }
+    .info p { margin: 8px 0; }
+    pre { background: #232f3e; color: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
   </style>
 </head>
 <body>
   <div class="container">
     <span class="tier">Web Tier</span>
     <h1>3-Tier Architecture Demo</h1>
-    <p>This page is served from the <strong>Web Tier</strong> behind the ALB.</p>
+    <p>This page is served from an EC2 instance behind the Application Load Balancer.</p>
     <div class="info">
-      <p><strong>Instance ID:</strong> ${INSTANCE_ID}</p>
-      <p><strong>Availability Zone:</strong> ${AZ}</p>
-      <p><strong>Private IP:</strong> ${LOCAL_IP}</p>
+      <p><strong>Instance ID:</strong> $INSTANCE_ID</p>
+      <p><strong>Availability Zone:</strong> $AZ</p>
+      <p><strong>Private IP:</strong> $LOCAL_IP</p>
     </div>
     <h3>Architecture</h3>
-    <pre>Internet → ALB → [Web Tier] → App Tier → Database
-                      ↑
-                  You are here</pre>
+    <pre>
+    Internet
+        ↓
+    [ ALB ] ← You hit this URL
+        ↓
+    [ Web Tier ] ← This instance ($INSTANCE_ID)
+        ↓
+    [ App Tier ]
+        ↓
+    [ Database ]
+    </pre>
+    <p><em>Refresh this page multiple times. If the Instance ID changes, the ALB is load balancing!</em></p>
   </div>
 </body>
 </html>
 EOF
+
+# Step 3d: Verify the file was created
+cat /var/www/html/index.html | head -5
 ```
 
-### Create Custom Page (nginx)
-
-If you're using nginx instead of Apache:
+**For nginx (if you used nginx instead of Apache):**
 
 ```bash
-# Same commands, different path:
-cat <<EOF | sudo tee /usr/share/nginx/html/index.html
-# ... same HTML content as above ...
+# Same steps, but write to nginx's web root instead:
+sudo tee /usr/share/nginx/html/index.html > /dev/null <<EOF
+# ... paste the same HTML content from above ...
 EOF
 ```
 
-### Test Load Balancing
+---
 
-After customizing the page on **both** web instances (with different instance IDs):
+### Step 4: Repeat for the Second Web Instance
 
-1. Open your ALB URL in a browser
-2. Refresh the page multiple times
-3. Watch the Instance ID and AZ change — this proves the ALB is distributing traffic
+**Important:** Disconnect from the first instance and connect to the second one, then run the same commands (Step 3).
 
-> **Tip:** If you see the same instance every time, the ALB might be using sticky sessions, or you're hitting the browser cache. Try `curl` instead:
-> ```bash
-> for i in {1..10}; do curl -s http://your-alb-url | grep "Instance ID"; done
-> ```
+Each instance will have **different values** for `$INSTANCE_ID`, `$AZ`, and `$LOCAL_IP` — that's the point! When you refresh your ALB URL, you'll see different instance details.
+
+```bash
+# Exit the current instance
+exit
+
+# Connect to the second web instance
+aws ssm start-session --target i-0def456ghi789
+# Then run Step 3 commands again
+```
+
+---
+
+### Step 5: Test Load Balancing
+
+Now open your ALB URL in a browser and refresh multiple times:
+
+```
+http://terraform-3tier-alb-xxxxxxxxx.us-east-1.elb.amazonaws.com
+```
+
+**What you should see:**
+- The Instance ID and AZ should change between refreshes
+- This proves the ALB is distributing requests across both web servers
+
+**If you always see the same instance:**
+
+Your browser might be caching. Test with curl instead:
+
+```bash
+# Run this 10 times and watch the Instance ID change
+for i in {1..10}; do
+  echo "Request $i:"
+  curl -s http://your-alb-url | grep "Instance ID"
+  sleep 1
+done
+```
 
 ---
 
