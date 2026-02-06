@@ -2589,22 +2589,27 @@ http://terraform-3tier-alb-xxxxxxxxx.us-east-1.elb.amazonaws.com
 
 **5d. If you always see the same instance:**
 
-Your browser might be caching. Test with curl on your **local machine**:
+Your browser might be caching. Test with curl on your **local machine**.
 
+**Command to run** (copy this, replace `your-alb-url` with your actual ALB DNS):
 ```bash
-# Run on your LOCAL machine (not EC2)
-$ for i in {1..10}; do
-    echo "--- Request $i ---"
-    curl -s http://terraform-3tier-alb-xxxxxxx.us-east-1.elb.amazonaws.com | grep "Instance ID"
-    sleep 1
-  done
+for i in {1..10}; do
+  echo "--- Request $i ---"
+  curl -s http://your-alb-url | grep "Instance ID"
+  sleep 1
+done
+```
 
+**Expected output** (Instance ID alternates between your two servers):
+```
 --- Request 1 ---
       <p><strong>Instance ID:</strong> i-0abc123def456</p>
 --- Request 2 ---
       <p><strong>Instance ID:</strong> i-0def456ghi789</p>
 --- Request 3 ---
       <p><strong>Instance ID:</strong> i-0abc123def456</p>
+--- Request 4 ---
+      <p><strong>Instance ID:</strong> i-0def456ghi789</p>
 ...
 ```
 
