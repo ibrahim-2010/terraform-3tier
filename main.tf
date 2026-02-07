@@ -20,22 +20,22 @@ terraform {
 
   required_providers {
     # TODO: Uncomment and configure the AWS provider
-    # aws = {
-    #   source  = "hashicorp/aws"
-    #   version = "~> 5.0"
-    # }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
   }
 }
 
 # TODO: Configure the AWS provider
-# provider "aws" {
-#   region = var.aws_region
-#
-#   default_tags {
-#     tags = {
-#       Project     = var.project_name
-#       Environment = var.environment
-#       ManagedBy   = "terraform"
-#     }
-#   }
-# }
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      Project     = var.project_name
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}

@@ -36,7 +36,7 @@ variable "web_instance_count" {
 variable "web_instance_type" {
   description = "Web tier instance type"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 variable "app_instance_count" {
@@ -48,7 +48,7 @@ variable "app_instance_count" {
 variable "app_instance_type" {
   description = "App tier instance type"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.micro"
 }
 
 # RDS Variables
@@ -97,14 +97,14 @@ variable "use_ecs" {
   default     = false
 }
 
-variable "web_container_image" {
-  description = "Docker image for web tier"
-  type        = string
-  default     = "nginx:latest"
-}
+# variable "web_container_image" {
+#   description = "Docker image for web tier"
+#   type        = string
+#   default     = "nginx:latest"
+# }
 
-variable "app_container_image" {
-  description = "Docker image for app tier"
-  type        = string
-  default     = "node:18-alpine"
-}
+# variable "app_container_image" {
+#   description = "Docker image for app tier"
+#   type        = string
+#   default     = "node:18-alpine"
+# }
